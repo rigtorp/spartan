@@ -41,10 +41,6 @@ public:
 
   size_t ParseMany(const char *buf, size_t n)
   {
-    timeval start, stop;
-    gettimeofday(&start, NULL);
-
-    int count = 0;
     size_t i = 0;
     while (i < n) {
       int len = readfixnum(&buf[i], 2);
@@ -52,13 +48,8 @@ public:
         break;
       }
       Parse(0, &buf[i+2]);
-      count++;
       i += len + 2;
     }
-
-    gettimeofday(&stop, NULL);
-    std::cout << ((stop.tv_sec - start.tv_sec) * 1e6 + (stop.tv_usec - start.tv_usec))/ (double) count << std::endl;
-
     return i;
   }
 
@@ -72,18 +63,22 @@ public:
     return true;
   }
 
-  void ReadMany(std::istream &stream)
+  double ReadMany(std::istream &stream, size_t count)
   {
-    std::vector<char>  buf;
-    buf.resize(1<<24);
-    size_t n = 0;
-    do {
-      stream.read(&buf[n], buf.size() - n);
-      n += stream.gcount();
-      size_t i = ParseMany(&buf[0], n);
-      std::memmove(&buf[0], &buf[i], n - i);
-      n -= i;
-    } while (stream.good());
+    std::vector<char> buf;
+    buf.reserve(1<<24);
+    for (size_t i = 0; i < count; ++i) {
+      buf.resize(buf.size() + 2);
+      if (!stream.read(buf.data() + buf.size() - 2, 2).good()) break;
+      int len = readfixnum(buf.data() + buf.size() - 2, 2);
+      buf.resize(buf.size() + len);
+      if (!stream.read(buf.data() + buf.size() - len, len).good()) break;
+    }
+    timeval start, stop;
+    gettimeofday(&start, NULL);
+    ParseMany(buf.data(), buf.size());
+    gettimeofday(&stop, NULL);
+    return ((stop.tv_sec - start.tv_sec) * 1e6 + (stop.tv_usec - start.tv_usec))/ (double) count;
   }
 
 private:
