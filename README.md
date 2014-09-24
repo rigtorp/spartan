@@ -18,7 +18,7 @@ Protocols
 License
 -------
 
-Copyright 2012 Erik Rigtorp <erik@rigtorp.com>
+Copyright 2012 Erik Rigtorp <erik@rigtorp.se>
 
 Sparan is avaiable under the Apache 2.0 license. See the file
 [LICENSE](https://github.com/rigtorp/spartan/blob/master/LICENSE)
