@@ -1,8 +1,8 @@
-CXXFLAGS ?= -pipe -g -march=native -std=c++11 -O3 -Wall -z now 
-#CXXFLAGS ?= -pipe -g -march=native -std=c++11 -Wall 
+CXXFLAGS ?= -pipe -g -march=native -std=c++14 -O3 -Wall -z now 
+#CXXFLAGS ?= -pipe -g -march=native -std=c++14 -Wall 
 LDFLAGS ?= -lrt 
 
-TARGETS = itch log
+TARGETS = itch log log2
 
 all: $(TARGETS)
 
