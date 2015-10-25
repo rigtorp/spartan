@@ -10,12 +10,12 @@ int main(int argc, char *argv[]) {
 
   for (int i = 0; i < nthreads; ++i) {
     threads.emplace_back([] {
-	for (int i = 0; i < 5; ++i) {
-	  Logger::Log("test", i, i*i);
-	}
-      });
+      for (int i = 0; i < 5; ++i) {
+        Logger::Log("test", i, i * i);
+      }
+    });
   }
-  for (auto& t : threads) {
+  for (auto &t : threads) {
     t.join();
   }
 

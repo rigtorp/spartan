@@ -1,137 +1,106 @@
 #pragma once
 
-#include <vector>
-#include <iostream>
-#include <stdexcept>
-#include "util.hpp"
+#include <cstdint>
 
-template <typename Handler>
-class Itch41Parser
-{
+template <typename Handler> class Itch50Parser {
 
 public:
-  
-  Itch41Parser(Handler &handler)
-    : handler_(handler) 
-  {}
+  Itch50Parser(Handler &handler) : handler_(handler) {}
 
-  void Parse(uint64_t seqno, const char *s)
-  {
-    switch (s[0]) {
-    case 'T': return;
-    case 'S': return;
-    case 'R': return;
-    case 'H': return;
-    case 'Y': return;
-    case 'L': return;
-    case 'A': return Add(seqno, s);
-    case 'F': return Add(seqno, s);
-    case 'E': return Executed(seqno, s);
-    case 'C': return Executed(seqno, s);
-    case 'X': return Cancel(seqno, s);
-    case 'D': return Delete(seqno, s);
-    case 'U': return Replace(seqno, s);
-    case 'P': return;
-    case 'Q': return;
-    case 'B': return;
-    case 'I': return;
-    default: throw std::runtime_error("unknown message type");
+  void ParseMessage(uint64_t seqno, const char *buf) {
+    switch (buf[0]) {
+    case 'A':
+      return Add(seqno, buf);
+    case 'F':
+      return Add(seqno, buf);
+    case 'E':
+      return Executed(seqno, buf);
+    case 'C':
+      return ExecutedAtPrice(seqno, buf);
+    case 'X':
+      return Cancel(seqno, buf);
+    case 'D':
+      return Delete(seqno, buf);
+    case 'U':
+      return Replace(seqno, buf);
     }
   }
 
-  size_t ParseMany(const char *buf, size_t n)
-  {
+  size_t ParseMany(const char *buf, size_t len) {
     size_t i = 0;
-    while (i < n) {
-      int len = readfixnum(&buf[i], 2);
-      if (i + len + 2 > n) {
+    while (i < len) {
+      int msg_len = read16(&buf[i]);
+      if (i + msg_len + 2 > len) {
         break;
       }
-      Parse(0, &buf[i+2]);
-      i += len + 2;
+      ParseMessage(0, &buf[i + 2]);
+      i += msg_len + 2;
     }
     return i;
   }
 
-  bool Read(std::istream &stream)
-  {
-    char buf[4096];
-    if (!stream.read(&buf[0], 2).good()) return false;
-    int len = readfixnum(&buf[0], 2); 
-    if (!stream.read(&buf[2], len).good()) return false;
-    Parse(0, &buf[2]);
-    return true;
-  }
-
-  double ReadMany(std::istream &stream, size_t count)
-  {
-    std::vector<char> buf;
-    buf.reserve(1<<24);
-    for (size_t i = 0; i < count; ++i) {
-      buf.resize(buf.size() + 2);
-      if (!stream.read(buf.data() + buf.size() - 2, 2).good()) break;
-      int len = readfixnum(buf.data() + buf.size() - 2, 2);
-      buf.resize(buf.size() + len);
-      if (!stream.read(buf.data() + buf.size() - len, len).good()) break;
-    }
-    timeval start, stop;
-    gettimeofday(&start, NULL);
-    ParseMany(buf.data(), buf.size());
-    gettimeofday(&stop, NULL);
-    return ((stop.tv_sec - start.tv_sec) * 1e6 + (stop.tv_usec - start.tv_usec))/ (double) count;
-  }
+  using Id = uint64_t;
+  using Qty = int32_t;
+  using Price = int32_t;
+  using Symbol = uint64_t;
 
 private:
-
-  void Add(uint64_t seqno, const char *s) 
-  {
-    uint64_t ts = readfixnum(&s[1], 4);
-    uint64_t ref = readfixnum(&s[5], 8);
-    bool bs = s[13] == 'B' ? true : false;
-    uint32_t shares = readfixnum(&s[14], 4);
-    uint64_t stock = readfixnum(&s[18], 8);
-    uint32_t price = readfixnum(&s[26], 4);
-    //std::cout << "A " << ref << " " << bs << " " << shares << " " << stock << " " << price << std::endl;
-    handler_.Add(seqno, ts, ref, bs, shares, stock, price);
+  uint32_t read16(const void *buf) {
+    return __builtin_bswap16(*static_cast<const uint16_t *>(buf));
   }
 
-  void Executed(uint64_t seqno, const char *s) 
-  {
-    uint64_t ts = readfixnum(&s[1], 4);
-    uint64_t ref = readfixnum(&s[5], 8);
-    uint32_t shares = readfixnum(&s[13], 4);
-    //std::cout << "E " << ref << " " << shares << std::endl;
-    handler_.Executed(seqno, ts, ref, shares);
+  uint32_t read32(const void *buf) {
+    return __builtin_bswap32(*static_cast<const uint32_t *>(buf));
   }
 
-  void Cancel(uint64_t seqno, const char *s) 
-  {
-    uint64_t ts = readfixnum(&s[1], 4);
-    uint64_t ref = readfixnum(&s[5], 8);
-    uint32_t shares = readfixnum(&s[13], 4);
-    //std::cout << "X " << ref << " " << shares << std::endl;
-    handler_.Cancel(seqno, ts, ref, shares);
+  uint64_t read64(const void *buf) {
+    return __builtin_bswap64(*static_cast<const uint64_t *>(buf));
   }
 
-  void Delete(uint64_t seqno, const char *s) 
-  {
-    uint64_t ts = readfixnum(&s[1], 4);
-    uint64_t ref = readfixnum(&s[5], 8);
-    //std::cout << "D " << ref << std::endl;
-    handler_.Delete(seqno, ts, ref);
+  uint64_t readsym8(const void *buf) {
+    return __builtin_bswap64(*static_cast<const uint64_t *>(buf));
   }
 
-  void Replace(uint64_t seqno, const char *s) 
-  {
-    uint64_t ts = readfixnum(&s[1], 4);
-    uint64_t ref = readfixnum(&s[5], 8);
-    uint64_t ref2 = readfixnum(&s[13], 8);
-    uint32_t shares = readfixnum(&s[21], 4);
-    uint32_t price = readfixnum(&s[25], 4);
-    //std::cout << "U " << ref << " " << ref2 << " " << shares << " " << price << std::endl;
-    handler_.Replace(seqno, ts, ref, ref2, shares, price);
+  void Add(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    bool bs = buf[19] == 'B' ? true : false;
+    Qty shares = read32(buf + 20);
+    Symbol stock = readsym8(buf + 24);
+    Price price = read32(buf + 32);
+    handler_.Add(seqno, ref, bs, shares, stock, price);
+  }
+
+  void Executed(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    Qty shares = read32(buf + 19);
+    handler_.Executed(seqno, ref, shares);
+  }
+
+  void ExecutedAtPrice(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    Qty shares = read32(buf + 19);
+    Price price = read32(buf + 32);
+    handler_.ExecutedAtPrice(seqno, ref, shares, price);
+  }
+
+  void Cancel(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    Qty shares = read32(buf + 19);
+    handler_.Reduce(seqno, ref, shares);
+  }
+
+  void Delete(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    handler_.Delete(seqno, ref);
+  }
+
+  void Replace(uint64_t seqno, const char *buf) {
+    Id ref = read64(buf + 11);
+    Id ref2 = read64(buf + 19);
+    Qty shares = read32(buf + 27);
+    Price price = read32(buf + 31);
+    handler_.Replace(seqno, ref, ref2, shares, price);
   }
 
   Handler &handler_;
 };
-

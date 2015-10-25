@@ -1,8 +1,8 @@
-CXXFLAGS ?= -pipe -g -march=native -std=c++14 -O3 -Wall -z now 
-#CXXFLAGS ?= -pipe -g -march=native -std=c++14 -Wall 
+CXXFLAGS ?= -g -march=native -std=c++14 -O3 -Wall -z now 
+#CXXFLAGS ?= -g -march=native -std=c++14 -Wall 
 LDFLAGS ?= -lrt -pthread
 
-TARGETS = itch log log_bench
+TARGETS = itch pitch_test log_bench
 
 all: $(TARGETS)
 
