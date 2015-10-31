@@ -1,3 +1,25 @@
+/*
+Copyright (c) 2015 Erik Rigtorp <erik@rigtorp.se>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ */
+
 #include "pitch.hpp"
 #include "feed.hpp"
 
@@ -20,7 +42,7 @@ int main(int argc, char *argv[]) {
   {
     // Test add order messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char addl[] = {34,  0x21, 0,   0,   0, 0, 1, 0,   0,   0,   0,   0,
@@ -49,7 +71,7 @@ int main(int argc, char *argv[]) {
   {
     // Test exec order messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char addl[] = {34,  0x21, 0,   0,   0, 0, 1, 0,   0,   0,   0,   0,
@@ -94,7 +116,7 @@ int main(int argc, char *argv[]) {
   {
     // Test reduce order messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char addl[] = {34,  0x21, 0,   0,   0, 0, 1, 0,   0,   0,   0,   0,
@@ -111,14 +133,14 @@ int main(int argc, char *argv[]) {
     assert(handler.bp.bidqty == 50);
     char reds[] = {16, 0x26, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100, 0};
     parser.ParseMessage(0, reds);
-    assert(handler.bp.bidqty == 0);
+    assert(handler.bp.bidqty == 50);
     assert(handler.bp.askqty == 0);
   }
 
   {
     // Test modify order messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char addl[] = {34,  0x21, 0,   0,   0, 0, 1, 0,   0,   0,   0,   0,
@@ -150,7 +172,7 @@ int main(int argc, char *argv[]) {
   {
     // Test delete order messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char addl[] = {34,  0x21, 0,   0,   0, 0, 1, 0,   0,   0,   0,   0,
@@ -165,13 +187,13 @@ int main(int argc, char *argv[]) {
     char del[] = {14, 0x29, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
     parser.ParseMessage(0, del);
     assert(handler.bp.bidqty == 0);
-    assert(handler.bp.askqty == 0);
+    assert(handler.bp.askqty == 100);
   }
 
   {
     // Test trade messages
     Handler handler;
-    Feed<Handler> feed(handler, false, false);
+    Feed<Handler> feed(handler, 100, false, false);
     PitchParser<Feed<Handler>> parser(feed);
     feed.Subscribe("A");
     char tradel[] = {41,  0x2A, 0, 0, 0, 0,   1,   1,   1,   1,   1,   1, 1, 1,

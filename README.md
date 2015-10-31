@@ -13,12 +13,12 @@ Components
 Protocols
 ---------
  
- * NASDAQ ITCH 4.1
+ * NASDAQ ITCH 5
 
 License
 -------
 
-Copyright 2012 Erik Rigtorp <erik@rigtorp.se>
+Copyright 2012-2015 Erik Rigtorp <erik@rigtorp.se>
 
-Sparan is avaiable under the Apache 2.0 license. See the file
+Sparan is avaiable under the MIT license. See the file
 [LICENSE](https://github.com/rigtorp/spartan/blob/master/LICENSE)

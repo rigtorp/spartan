@@ -1,10 +1,30 @@
+/*
+Copyright (c) 2012-2015 Erik Rigtorp <erik@rigtorp.se>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ */
+
 #pragma once
 
-#include <iostream>
-#include <map>
-#include <unordered_map>
-#include <functional>
+#include "HashMap.h"
 #include <boost/container/flat_map.hpp>
+#include <iostream>
 
 struct BestPrice {
   int64_t bidqty;
@@ -24,26 +44,22 @@ struct BestPrice {
   }
 };
 
-struct Level {
-  int64_t price;
-  int64_t qty;
-  uint64_t seqno;
-
-  friend std::ostream &operator<<(std::ostream &out, const Level &level) {
-    out << "Level(" << level.price << ", " << level.qty << ", " << level.seqno
-        << ")";
-    return out;
-  }
-};
-
 class OrderBook {
 public:
-  OrderBook(uint64_t symbol, std::string instrument, void *data = NULL)
-      : symbol_(symbol), instrument_(instrument), data_(NULL) {}
+  struct Level {
+    int64_t price = 0;
+    int64_t qty = 0;
+    uint64_t seqno = 0;
 
-  const std::string &GetInstrument() const { return instrument_; }
+    friend std::ostream &operator<<(std::ostream &out, const Level &level) {
+      out << "Level(" << level.price << ", " << level.qty << ", " << level.seqno
+          << ")";
+      return out;
+    }
+  };
 
-  uint64_t GetSymbol() const { return symbol_; }
+public:
+  OrderBook(void *data = NULL) : data_(NULL) {}
 
   BestPrice GetBestPrice() const {
     auto buy = buy_.rbegin();
@@ -65,7 +81,7 @@ public:
   void SetUserData(void *data) { data_ = data; }
 
   bool Add(uint64_t seqno, bool buy_sell, int64_t price, int64_t qty) {
-    if (qty == 0) {
+    if (qty <= 0) {
       return false;
     }
     auto &side = buy_sell ? buy_ : sell_;
@@ -96,7 +112,7 @@ public:
     if (buy_.empty() || sell_.empty()) {
       return false;
     }
-    return -buy_.begin()->first >= sell_.begin()->first;
+    return -buy_.rbegin()->first >= sell_.rbegin()->first;
   }
 
   void UnCross() {
@@ -115,44 +131,55 @@ public:
 
   friend std::ostream &operator<<(std::ostream &out, const OrderBook &book) {
     out << "Buy:" << std::endl;
-    for (auto it = book.buy_.begin(); it != book.buy_.end(); it++) {
+    for (auto it = book.buy_.rbegin(); it != book.buy_.rend(); it++) {
       out << it->second << std::endl;
     }
     out << "Sell:" << std::endl;
-    for (auto it = book.sell_.begin(); it != book.sell_.end(); it++) {
+    for (auto it = book.sell_.rbegin(); it != book.sell_.rend(); it++) {
       out << it->second << std::endl;
     }
     return out;
   }
 
 private:
-  // std::map<int64_t, Level> buy_, sell_;
-  // boost::container::flat_map<int64_t, Level> buy_, sell_;
   boost::container::flat_map<int64_t, Level, std::greater<int64_t>> buy_, sell_;
-  uint64_t symbol_;
-  std::string instrument_;
-  void *data_;
-};
-
-struct Order {
-  uint64_t seqno;
-  bool buy_sell;
-  int64_t qty;
-  uint64_t symbol;
-  int64_t price;
-  OrderBook *book;
-
-  Order(uint64_t seqno, bool buy_sell, int64_t qty, uint64_t symbol,
-        int64_t price, OrderBook *book)
-      : seqno(seqno), buy_sell(buy_sell), qty(qty), symbol(symbol),
-        price(price), book(book) {}
+  void *data_ = nullptr;
 };
 
 template <typename Handler> class Feed {
 
+  static constexpr int16_t NOBOOK = std::numeric_limits<int16_t>::max();
+  static constexpr int16_t MAXBOOK = std::numeric_limits<int16_t>::max();
+
+  struct Order {
+    int64_t price = 0;
+    int32_t qty = 0;
+    bool buy_sell = 0;
+    int16_t bookid = NOBOOK;
+
+    Order(int64_t price, int32_t qty, int16_t buy_sell, int16_t bookid)
+        : price(price), qty(qty), buy_sell(buy_sell), bookid(bookid) {}
+    Order() {}
+  };
+
+  static_assert(sizeof(Order) == 16, "");
+
 public:
-  Feed(Handler &handler, bool all_orders = true, bool all_books = false)
-      : handler_(handler), all_orders_(all_orders), all_books_(all_books) {}
+  Feed(Handler &handler, size_t size_hint, bool all_orders = false,
+       bool all_books = false)
+      : handler_(handler), all_orders_(all_orders), all_books_(all_books),
+        symbols_(16384, 0),
+        orders_(size_hint, std::numeric_limits<uint64_t>::max()) {
+    size_hint_ = orders_.bucket_count();
+  }
+
+  ~Feed() {
+    if (orders_.bucket_count() > size_hint_) {
+      std::cerr << "WARNING bucket count " << orders_.bucket_count()
+                << " greater than size hint " << size_hint_
+                << ", recommend increasing size_hint" << std::endl;
+    }
+  }
 
   OrderBook &Subscribe(std::string instrument, void *data = NULL) {
     if (instrument.size() < 8) {
@@ -161,63 +188,68 @@ public:
     uint64_t symbol = __builtin_bswap64(
         *reinterpret_cast<const uint64_t *>(instrument.data()));
 
-    auto res =
-        books_.insert(std::make_pair(symbol, OrderBook(symbol, instrument)));
-    OrderBook &book = res.first->second;
-    if (res.second == false) {
-      return book;
+    auto it = symbols_.find(symbol);
+    if (it != symbols_.end()) {
+      return books_[it->second];
     }
+
+    if (books_.size() == MAXBOOK) {
+      throw std::runtime_error("too many subscriptions");
+    }
+
+    books_.push_back(OrderBook());
+    symbols_.emplace(symbol, books_.size() - 1);
+
+    OrderBook &book = books_.back();
     book.SetUserData(data);
-    for (auto it = orders_.begin(); it != orders_.end(); it++) {
-      Order &order = it->second;
-      if (order.symbol == symbol) {
-        book.Add(order.seqno, order.buy_sell, order.price, order.qty);
-        order.book = &book;
-      }
-    }
     return book;
   }
 
-  void Add(uint64_t seqno, uint64_t ref, bool buy_sell, int64_t qty,
+  void Add(uint64_t seqno, uint64_t ref, bool buy_sell, int32_t qty,
            uint64_t symbol, int64_t price) {
-    typename decltype(books_)::iterator bit;
-    if (all_books_) {
-      bit = books_.emplace(symbol, OrderBook(symbol, "")).first;
-    } else {
-      bit = books_.find(symbol);
-    }
-    if (bit == books_.end()) {
-      if (all_orders_) {
-        orders_.emplace(ref, Order(seqno, buy_sell, qty, symbol, price, NULL));
+    auto it = symbols_.find(symbol);
+    if (it == symbols_.end()) {
+      if (!all_books_) {
+        if (all_orders_) {
+          orders_.emplace(ref, Order(price, qty, buy_sell, NOBOOK));
+        }
+        return;
       }
-      return;
+      if (books_.size() == MAXBOOK) {
+        // too many books
+        return;
+      }
+      books_.push_back(OrderBook());
+      it = symbols_.emplace(symbol, books_.size() - 1).first;
     }
-
-    OrderBook *book = &bit->second;
-    if (orders_.emplace(ref, Order(seqno, buy_sell, qty, symbol, price, book))
-            .second) {
-      bool top = book->Add(seqno, buy_sell, price, qty);
-      handler_.OnQuote(book, top);
+    int16_t bookid = it->second;
+    OrderBook &book = books_[bookid];
+    if (orders_.emplace(ref, Order(price, qty, buy_sell, bookid)).second) {
+      bool top = book.Add(seqno, buy_sell, price, qty);
+      handler_.OnQuote(&book, top);
     }
   }
 
-  void Executed(uint64_t seqno, uint64_t ref, int64_t qty) {
+  void Executed(uint64_t seqno, uint64_t ref, int32_t qty) {
     auto oit = orders_.find(ref);
     if (oit == orders_.end()) {
       return;
     }
+
     Order &order = oit->second;
-    if (order.book != NULL) {
-      bool top = order.book->Reduce(seqno, order.buy_sell, order.price, qty);
-      handler_.OnTrade(order.book, qty, order.price, top);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, qty);
+      handler_.OnTrade(&book, qty, order.price, top);
     }
+
     order.qty -= qty;
     if (order.qty <= 0) {
       orders_.erase(oit);
     }
   }
 
-  void ExecutedAtPrice(uint64_t seqno, uint64_t ref, int64_t qty,
+  void ExecutedAtPrice(uint64_t seqno, uint64_t ref, int32_t qty,
                        int64_t price) {
     auto oit = orders_.find(ref);
     if (oit == orders_.end()) {
@@ -225,9 +257,10 @@ public:
     }
 
     Order &order = oit->second;
-    if (order.book != NULL) {
-      bool top = order.book->Reduce(seqno, order.buy_sell, order.price, qty);
-      handler_.OnTrade(order.book, qty, price, top);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, qty);
+      handler_.OnTrade(&book, qty, price, top);
     }
 
     order.qty -= qty;
@@ -245,14 +278,15 @@ public:
 
     Order &order = oit->second;
     int32_t delta = order.qty - leaves_qty;
-    if (order.book != NULL) {
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
       bool top;
       if (delta > 0) {
-        top = order.book->Reduce(seqno, order.buy_sell, order.price, delta);
+        top = book.Reduce(seqno, order.buy_sell, order.price, delta);
       } else {
-        top = order.book->Add(seqno, order.buy_sell, order.price, -delta);
+        top = book.Add(seqno, order.buy_sell, order.price, -delta);
       }
-      handler_.OnTrade(order.book, qty, price, top);
+      handler_.OnTrade(&book, qty, price, top);
     }
 
     order.qty = leaves_qty;
@@ -261,16 +295,19 @@ public:
     }
   }
 
-  void Reduce(uint64_t seqno, uint64_t ref, int64_t qty) {
+  void Reduce(uint64_t seqno, uint64_t ref, int32_t qty) {
     auto oit = orders_.find(ref);
     if (oit == orders_.end()) {
       return;
     }
+
     Order &order = oit->second;
-    if (order.book != NULL) {
-      bool top = order.book->Reduce(seqno, order.buy_sell, order.price, qty);
-      handler_.OnQuote(order.book, top);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, qty);
+      handler_.OnQuote(&book, top);
     }
+
     order.qty -= qty;
     if (order.qty <= 0) {
       orders_.erase(oit);
@@ -282,31 +319,34 @@ public:
     if (oit == orders_.end()) {
       return;
     }
+
     Order &order = oit->second;
-    if (order.book != NULL) {
-      bool top =
-          order.book->Reduce(seqno, order.buy_sell, order.price, order.qty);
-      handler_.OnQuote(order.book, top);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, order.qty);
+      handler_.OnQuote(&book, top);
     }
+
     orders_.erase(oit);
   }
 
-  void Replace(uint64_t seqno, uint64_t ref, uint64_t ref2, int64_t qty,
+  void Replace(uint64_t seqno, uint64_t ref, uint64_t ref2, int32_t qty,
                int64_t price) {
     auto oit = orders_.find(ref);
     if (oit == orders_.end()) {
       return;
     }
+
     Order &order = oit->second;
-    orders_.emplace(ref2, Order(seqno, order.buy_sell, qty, order.symbol, price,
-                                order.book));
-    if (order.book != NULL) {
-      bool top =
-          order.book->Reduce(seqno, order.buy_sell, order.price, order.qty);
-      bool top2 = order.book->Add(seqno, order.buy_sell, price, qty);
-      handler_.OnQuote(order.book, top || top2);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, order.qty);
+      bool top2 = book.Add(seqno, order.buy_sell, price, qty);
+      handler_.OnQuote(&book, top || top2);
     }
-    orders_.erase(ref);
+
+    orders_.erase(oit);
+    orders_.emplace(ref2, Order(price, qty, order.buy_sell, order.bookid));
   }
 
   void Modify(uint64_t seqno, uint64_t id, int32_t qty, int64_t price) {
@@ -314,13 +354,15 @@ public:
     if (oit == orders_.end()) {
       return;
     }
+
     Order &order = oit->second;
-    if (order.book != NULL) {
-      bool top =
-          order.book->Reduce(seqno, order.buy_sell, order.price, order.qty);
-      bool top2 = order.book->Add(seqno, order.buy_sell, price, qty);
-      handler_.OnQuote(order.book, top || top2);
+    if (order.bookid != NOBOOK) {
+      OrderBook &book = books_[order.bookid];
+      bool top = book.Reduce(seqno, order.buy_sell, order.price, order.qty);
+      bool top2 = book.Add(seqno, order.buy_sell, price, qty);
+      handler_.OnQuote(&book, top || top2);
     }
+
     order.qty = qty;
     order.price = price;
     if (order.qty <= 0) {
@@ -329,22 +371,41 @@ public:
   }
 
   void Trade(uint64_t seqno, int64_t shares, uint64_t symbol, int64_t price) {
-    auto bit = books_.find(symbol);
-    if (bit == books_.end()) {
+    auto it = symbols_.find(symbol);
+    if (it == symbols_.end()) {
       return;
     }
-    OrderBook *book = &bit->second;
+
+    OrderBook *book = &books_[it->second];
     handler_.OnTrade(book, shares, price, false);
   }
+
+  size_t Size() const { return orders_.size(); }
 
 private:
   // Non-copyable
   Feed(const Feed &) = delete;
   Feed &operator=(const Feed &) = delete;
 
+  struct Hash {
+    size_t operator()(uint64_t h) const noexcept {
+      h ^= h >> 33;
+      h *= 0xff51afd7ed558ccd;
+      h ^= h >> 33;
+      h *= 0xc4ceb9fe1a85ec53;
+      h ^= h >> 33;
+      return h;
+    }
+  };
+
   Handler &handler_;
-  std::unordered_map<uint64_t, OrderBook> books_;
-  std::unordered_map<uint64_t, Order> orders_;
-  bool all_orders_;
-  bool all_books_;
+  size_t size_hint_ = 0;
+  bool all_orders_ = false;
+  bool all_books_ = false;
+
+  std::vector<OrderBook> books_;
+  // std::unordered_map<uint64_t, uint16_t, Hash> symbols_;
+  HashMap<uint64_t, uint16_t, Hash> symbols_;
+  // std::unordered_map<uint64_t, Order, Hash> orders_;
+  HashMap<uint64_t, Order, Hash> orders_;
 };
